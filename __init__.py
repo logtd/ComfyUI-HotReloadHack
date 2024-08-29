@@ -23,6 +23,14 @@ from comfy_execution import caching
 reloaded_class_types = {}
 
 
+def dfs(item_list, searches):
+    for item in item_list:
+        if (isinstance(item, frozenset) or isinstance(item, tuple)) and dfs(item, searches):
+            return True
+        elif item in searches:
+            return True
+    return False
+
 def monkeypatch():
     # i'm not proud, but i can hot reload
     original_set_prompt = caching.BasicCache.set_prompt
@@ -30,17 +38,25 @@ def monkeypatch():
         if not hasattr(self, 'cache_key_set'):
             reloaded_class_types.clear()
             return original_set_prompt(self, dynprompt, node_ids, is_changed_cache)
+        
+        found_keys = []
+        for key, item_list in self.cache_key_set.keys.items():
+            if dfs(item_list, reloaded_class_types):
+                found_keys.append(key)
 
-        for key, value in dynprompt.original_prompt.items():
-            if value['class_type'] in reloaded_class_types:
-                cache_key = self.cache_key_set.get_data_key(key)
-                if cache_key and cache_key in self.cache:
-                    del self.cache[cache_key]
-                    del self.cache_key_set.keys[key]
-                    del self.cache_key_set.subcache_keys[key]
-                reloaded_class_types[value['class_type']] -= 1
-                if reloaded_class_types[value['class_type']] == 0:
-                    del reloaded_class_types[value['class_type']]
+        if len(found_keys):
+            for value_key in list(reloaded_class_types.keys()):
+                reloaded_class_types[value_key] -= 1
+                if reloaded_class_types[value_key] == 0:
+                    del reloaded_class_types[value_key]
+
+        
+        for key in found_keys:
+            cache_key = self.cache_key_set.get_data_key(key)
+            if cache_key and cache_key in self.cache:
+                del self.cache[cache_key]
+                del self.cache_key_set.keys[key]
+                del self.cache_key_set.subcache_keys[key]
         return original_set_prompt(self, dynprompt, node_ids, is_changed_cache)
     
     caching.HierarchicalCache.set_prompt = set_prompt
