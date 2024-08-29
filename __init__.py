@@ -20,6 +20,9 @@ from nodes import load_custom_node
 from comfy_execution import caching
 
 
+from comfy.cli_args import args
+
+
 reloaded_class_types = {}
 
 
@@ -83,10 +86,7 @@ def reload_module(module_name):
         reloaded_class_types[key] = 3 # 3 caches to rule them all
 
 
-@routes.get("/node_dev/reload/{module_name}")
-async def reload(request):
-    """ Reload the requested custom node """
-    module_name = request.match_info['module_name']
+def reload(module_name):
     reload_modules = [mod_name for mod_name in sys.modules.keys() if module_name in mod_name]
     for reload_mod in reload_modules:
         del_module(reload_mod)
@@ -130,18 +130,14 @@ class DebouncedHotReloader(FileSystemEventHandler):
 
     def check_and_reload(self, module_name, scheduled_time):
         if self.last_modified[module_name] == scheduled_time:
-            self.call_reload_api(module_name)
+            self.call_reload(module_name)
 
-    def call_reload_api(self, module_name):
+    def call_reload(self, module_name):
         try:
-            url = f"http://localhost:3021/node_dev/reload/{module_name}"
-            response = requests.get(url)
-            if response.status_code == 200:
-                logging.info(f"Successfully triggered reload for module: {module_name}")
-            else:
-                logging.error(f"Failed to trigger reload for module: {module_name}. Status code: {response.status_code}")
+            reload(module_name)
+            logging.info(f'[ComfyUI-HotReloadHack] Reloaded module {module_name}')
         except requests.RequestException as e:
-            logging.error(f"Error calling reload API for module {module_name}: {e}")
+            logging.error(f"Error calling reload for module {module_name}: {e}")
 
 
 class HotReloaderService:
