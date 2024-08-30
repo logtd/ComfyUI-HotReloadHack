@@ -9,10 +9,10 @@ This is a very hacky way to get hot reloading of custom nodes. It probably has b
 
 ## How to Use
 
-Having this node pack installed will automatically start a watchdog that looks for changes in custom node repos.
+HotReloadHack automatically watches files in your `custom_nodes/` directory and when one changes reloads the node repo it belongs to. 
+It also clears the Comfy execution cache for all nodes in that repo so Comfy knows which nodes it needs to rerun.
 
-When a file is changed the Comfy execution graph cache will be crawled and nodes within that changed repo or downstream of those nodes will be invalidated. The next run will use updated code for those nodes.
-
+As a bonus it will load in new node repos, so you don't have to restart Comfy after downloading node packs.
 
 
 ## Examples
