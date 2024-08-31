@@ -1,19 +1,25 @@
 # ComfyUI-HotReloadHack
 Hot reloading for custom node developers
 
-This is a very hacky way to get hot reloading of custom nodes. It probably has bugs or doesn't work for complex workflows.
+This is a very hacky way to get hot reloading of custom nodes, but has worked very well on all workflows tested.
+
+## Features
+* Watches files in `ComfyUI/custom_nodes/`
+* Automatically reloads new code for any repo changed
+* Clears the Comfy execution cache so Comfy will rerun nodes in changed repo
+* Automatically loads in new repos that you download without the need to restart ComfyUI
 
 ## Installation
-
-`python -m pip install watchdog`
+After git cloning the repo into your `custom_nodes/` you only need to install watchdog.
+```
+python -m pip install watchdog
+```
 
 ## How to Use
 
 HotReloadHack automatically watches files in your `custom_nodes/` directory and when one changes reloads the node repo it belongs to. 
-It also clears the Comfy execution cache for all nodes in that repo so Comfy knows which nodes it needs to rerun.
 
-As a bonus it will load in new node repos, so you don't have to restart Comfy after downloading node packs.
-
+It does not use a file dependency graph (yet), so all nodes in the changed repo will run on the next Comfy execution.
 
 ## Examples
 
