@@ -25,7 +25,7 @@ from comfy_execution import caching
 # ==============================================================================
 
 RELOADED_CLASS_TYPES: dict = {}  # Stores types of classes that have been reloaded.
-CUSTOM_NODE_ROOT: str = folder_paths.folder_names_and_paths["custom_nodes"][0]  # Root directory for custom nodes.
+CUSTOM_NODE_ROOT: list[str] = folder_paths.folder_names_and_paths["custom_nodes"][0]  # Custom Node root directory list.
 
 # Set of modules to exclude from reloading.
 EXCLUDE_MODULES: set[str] = {'ComfyUI-Manager', 'ComfyUI-HotReloadHack'}
@@ -160,7 +160,7 @@ class DebouncedHotReloader(FileSystemEventHandler):
             if module_name in sys.modules:
                 del sys.modules[module_name]
 
-            module_path_init: str = os.path.join(CUSTOM_NODE_ROOT, module_name, '__init__.py')
+            module_path_init: str = os.path.join(CUSTOM_NODE_ROOT[0], module_name, '__init__.py')
             spec = importlib.util.spec_from_file_location(module_name, module_path_init)
             module = importlib.util.module_from_spec(spec)
 
@@ -173,7 +173,7 @@ class DebouncedHotReloader(FileSystemEventHandler):
                 logging.error(f"Failed to reload module {module_name}: {e}")
                 return web.Response(text='FAILED')
 
-            module_path: str = os.path.join(CUSTOM_NODE_ROOT, module_name)
+            module_path: str = os.path.join(CUSTOM_NODE_ROOT[0], module_name)
             load_custom_node(module_path)
             return web.Response(text='OK')
 
@@ -191,7 +191,7 @@ class DebouncedHotReloader(FileSystemEventHandler):
         if is_hidden_file(file_path):
             return
 
-        relative_path: str = os.path.relpath(file_path, CUSTOM_NODE_ROOT)
+        relative_path: str = os.path.relpath(file_path, CUSTOM_NODE_ROOT[0])
         root_dir: str = relative_path.split(os.path.sep)[0]
 
         if HOTRELOAD_OBSERVE_ONLY and root_dir not in HOTRELOAD_OBSERVE_ONLY:
@@ -258,7 +258,7 @@ class HotReloaderService:
     def start(self):
         """Start observing for file changes."""
         self.__observer = Observer()
-        self.__observer.schedule(self.__reloader, CUSTOM_NODE_ROOT, recursive=True)
+        self.__observer.schedule(self.__reloader, CUSTOM_NODE_ROOT[0], recursive=True)
         self.__observer.start()
 
     def stop(self):
@@ -284,12 +284,30 @@ def monkeypatch():
         :param node_ids: Node IDs to process.
         :param is_changed_cache: Boolean flag indicating if cache has changed.
         """
-        if dfs(node_ids, {'custom_id_cache'}) or dfs(node_ids, caching.custom_id_cache.keys()):
-            caching.custom_id_cache.clear()
+        if not hasattr(self, 'cache_key_set'):
+            RELOADED_CLASS_TYPES.clear()
+            return original_set_prompt(self, dynprompt, node_ids, is_changed_cache)
 
+        found_keys = []
+        for key, item_list in self.cache_key_set.keys.items():
+            if dfs(item_list, RELOADED_CLASS_TYPES):
+                found_keys.append(key)
+
+        if len(found_keys):
+            for value_key in list(RELOADED_CLASS_TYPES.keys()):
+                RELOADED_CLASS_TYPES[value_key] -= 1
+                if RELOADED_CLASS_TYPES[value_key] == 0:
+                    del RELOADED_CLASS_TYPES[value_key]
+
+        for key in found_keys:
+            cache_key = self.cache_key_set.get_data_key(key)
+            if cache_key and cache_key in self.cache:
+                del self.cache[cache_key]
+                del self.cache_key_set.keys[key]
+                del self.cache_key_set.subcache_keys[key]
         return original_set_prompt(self, dynprompt, node_ids, is_changed_cache)
 
-    caching.BasicCache.set_prompt = set_prompt
+    caching.HierarchicalCache.set_prompt = set_prompt
 
 def setup():
     """Sets up the hot reload system."""
@@ -301,3 +319,6 @@ def setup():
     hot_reloader_service.start()
 
 setup()
+
+NODE_CLASS_MAPPINGS = {}
+NODE_DISPLAY_NAME_MAPPINGS = {}
