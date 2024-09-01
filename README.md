@@ -17,12 +17,32 @@ python -m pip install watchdog
 
 ## How to Use
 
-HotReloadHack automatically watches files in your `custom_nodes/` directory and when one changes reloads the node repo it belongs to. 
+HotReloadHack automatically watches files in your `custom_nodes/` directory and when one changes reloads the node repo it belongs to.
 
 It does not use a file dependency graph (yet), so all nodes in the changed repo will run on the next Comfy execution.
+
+### Environment Variables
+
+`EXCLUDE_MODULES`
+
+comma separated list of module names exclude from forcing a reload.
+
+Note: `ComfyUIManager` and `ComfyUI-HotReloadHack` are automatically excluded.
+
+set EXCLUDE_MODULES=Jovimetrix,ComfyUIManager
+
+`HOTRELOAD_OBSERVE_ONLY`
+
+comma separated list of module names to be the exclusive list of modules to scan.
+
+`HOTRELOAD_EXTENSIONS`
+
+comma separated list of extensions. The default is to reload on `.py, .json or .yaml` file changes *only*. If you want to have it scan all extensions, use `*`.
 
 ## Examples
 
 ![example_without_hrh](https://github.com/user-attachments/assets/7f29fd52-410d-48fe-8f1a-64b6d5e122f3)
 
 ![example_with_hrh](https://github.com/user-attachments/assets/a13f6e4f-a081-43bd-89b8-e6a98483f52f)
+
+![example_with_hrh_and_jovi](https://github.com/user-attachments/assets/a13f6e4f-a081-43bd-89b8-e6a98483f52f)
