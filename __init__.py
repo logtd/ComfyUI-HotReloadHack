@@ -1,3 +1,4 @@
+import hashlib
 import sys
 import os
 import threading
@@ -95,7 +96,8 @@ def reload(module_name):
     return web.Response(text='OK')
 
 
-excluded = set(['ComfyUI-Manager', 'ComfyUI-HotReload'])
+EXCLUDED_REPOS = set(['ComfyUI-Manager', 'ComfyUI-HotReloadHack'])
+INCLUDED_FILE_TYPES = set(['.py', '.json', '.yaml'])
 
 
 class DebouncedHotReloader(FileSystemEventHandler):
@@ -103,13 +105,46 @@ class DebouncedHotReloader(FileSystemEventHandler):
         self.delay = delay
         self.last_modified = defaultdict(float)
         self.reload_timers = {}
+        self.file_hashes = {}
 
     def on_modified(self, event):
         if not event.is_directory:
             file_path = event.src_path
+
+            _, file_extension = os.path.splitext(file_path)
+            if file_extension not in INCLUDED_FILE_TYPES:
+                return
+            
+            if self.is_hidden(file_path):
+                return
+            
+            current_hash = self.get_file_hash(file_path)
+            if current_hash == self.file_hashes.get(file_path):
+                logging.debug(f"Python file {file_path} triggered event but content hasn't changed. Ignoring.")
+                return
+            
+            self.file_hashes[file_path] = current_hash
+            
             root_dir = self.get_root_directory(file_path)
-            if root_dir not in excluded:
+            if root_dir not in EXCLUDED_REPOS:
                 self.schedule_reload(root_dir)
+
+    def is_hidden(self, file_path):
+        # Check if file or any parent directory is hidden
+        path = os.path.abspath(file_path)
+        while path != os.path.dirname(path):  # Stop at the root directory
+            if os.path.basename(path).startswith('.'):
+                return True
+            path = os.path.dirname(path)
+        return False
+
+    def get_file_hash(self, file_path):
+        try:
+            with open(file_path, 'rb') as f:
+                return hashlib.md5(f.read()).hexdigest()
+        except Exception as e:
+            logging.error(f"Error reading file {file_path}: {e}")
+            return None
 
     def get_root_directory(self, file_path):
         custom_nodes_dir = os.path.abspath('custom_nodes')
