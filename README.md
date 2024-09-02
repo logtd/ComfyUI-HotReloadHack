@@ -45,4 +45,6 @@ comma separated list of extensions. The default is to reload on `.py, .json or .
 
 ![example_with_hrh](https://github.com/user-attachments/assets/a13f6e4f-a081-43bd-89b8-e6a98483f52f)
 
+Thanks to [Jovi](https://github.com/Amorano) for contributing! Feel free to open a PR and contribute!
+
 ![example_with_hrh_and_jovi](https://github.com/user-attachments/assets/7171b336-7aee-480d-9e92-f1db8fe94865)
