@@ -23,13 +23,13 @@ It does not use a file dependency graph (yet), so all nodes in the changed repo 
 
 ### Environment Variables
 
-`EXCLUDE_MODULES`
+`HOTRELOAD_EXCLUDE`
 
 comma separated list of module names exclude from forcing a reload.
 
 Note: `ComfyUIManager` and `ComfyUI-HotReloadHack` are automatically excluded.
 
-set EXCLUDE_MODULES=Jovimetrix,ComfyUIManager
+set HOTRELOAD_EXCLUDE=Jovimetrix,ComfyUIManager
 
 `HOTRELOAD_OBSERVE_ONLY`
 
