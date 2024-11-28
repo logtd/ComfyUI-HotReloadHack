@@ -38,6 +38,7 @@ HOTRELOAD_OBSERVE_ONLY: set[str] = set(x for x in os.getenv("HOTRELOAD_OBSERVE_O
 # File extensions to watch for changes.
 HOTRELOAD_EXTENSIONS: set[str] = set(x.strip() for x in os.getenv("HOTRELOAD_EXTENSIONS", '.py,.json,.yaml').split(',') if x)
 
+
 # Time to wait before reloading after detecting a file change, default is 1.0 second.
 try:
     DEBOUNCE_TIME: float = float(os.getenv("HOTRELOAD_DEBOUNCE_TIME", 1.0))
@@ -177,13 +178,20 @@ class DebouncedHotReloader(FileSystemEventHandler):
             load_custom_node(module_path)
             return web.Response(text='OK')
 
-    def on_modified(self, event):
-        """Handles file modification events."""
+    def on_created(self, event):
+        """Handles file creation events."""
         if event.is_directory:
             return
+        self.handle_file_event(event.src_path)
 
-        file_path: str = event.src_path
+    def on_deleted(self, event):
+        """Handles file deletion events."""
+        if event.is_directory:
+            return
+        self.handle_file_event(event.src_path)
 
+    def handle_file_event(self, file_path: str):
+        """Common handler for file events (modified/created/deleted)."""
         if not any(ext == '*' for ext in HOTRELOAD_EXTENSIONS):
             if not any(file_path.endswith(ext) for ext in HOTRELOAD_EXTENSIONS):
                 return
@@ -199,19 +207,20 @@ class DebouncedHotReloader(FileSystemEventHandler):
         elif root_dir in EXCLUDE_MODULES:
             return
 
-        current_hash: str = hash_file(file_path)
-        if current_hash == self.__hashes.get(file_path):
-            logging.debug(f"File {file_path} triggered event but content hasn't changed. Ignoring.")
+        self.schedule_reload(root_dir, file_path)
+
+    def on_modified(self, event):
+        """Handles file modification events."""
+        if event.is_directory:
             return
+        self.handle_file_event(event.src_path)
 
-        self.__hashes[file_path] = current_hash
-        self.schedule_reload(root_dir)
-
-    def schedule_reload(self, module_name: str):
+    def schedule_reload(self, module_name: str, file_path: str):
         """
         Schedules a reload of the given module after a delay.
 
         :param module_name: The name of the module to reload.
+        :param file_path: The path of the modified file.
         """
         current_time: float = time.time()
         self.__last_modified[module_name] = current_time
@@ -220,16 +229,21 @@ class DebouncedHotReloader(FileSystemEventHandler):
             if module_name in self.__reload_timers:
                 self.__reload_timers[module_name].cancel()
 
-            timer = threading.Timer(self.__delay, self.check_and_reload, args=[module_name, current_time])
+            timer = threading.Timer(
+                self.__delay, 
+                self.check_and_reload, 
+                args=[module_name, current_time, file_path]
+            )
             self.__reload_timers[module_name] = timer
             timer.start()
 
-    def check_and_reload(self, module_name: str, scheduled_time: float):
+    def check_and_reload(self, module_name: str, scheduled_time: float, file_path: str):
         """
         Checks the timestamp and reloads the module if needed.
 
         :param module_name: The name of the module to check.
         :param scheduled_time: The scheduled time for the reload.
+        :param file_path: The path of the modified file.
         """
         with self.__lock:
             if self.__last_modified[module_name] != scheduled_time:
@@ -237,11 +251,14 @@ class DebouncedHotReloader(FileSystemEventHandler):
 
         try:
             self.__reload(module_name)
-            logging.info(f'[ComfyUI-HotReloadHack] Reloaded module {module_name}')
+            action = "deleted" if not os.path.exists(file_path) else "added" if file_path not in self.__hashes else "modified"
+            print(f'\033[92m[ComfyUI-HotReloadHack] File {action}!\033[0m')  # Green text
+            print(f'\033[92m[ComfyUI-HotReloadHack] Reloaded module: {module_name}\033[0m')
+            print(f'\033[92m[ComfyUI-HotReloadHack] {action} file: {file_path}\033[0m')
         except requests.RequestException as e:
-            logging.error(f"Error calling reload for module {module_name}: {e}")
+            print(f'\033[91m[ComfyUI-HotReloadHack] Reload failed: {e}\033[0m')  # Red text
         except Exception as e:
-            logging.exception(f"[ComfyUI-HotReloadHack] {e}")
+            print(f'\033[91m[ComfyUI-HotReloadHack] Error occurred: {e}\033[0m')
 
 class HotReloaderService:
     """Service to manage the hot reloading of modules."""
