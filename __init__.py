@@ -10,6 +10,8 @@ import logging
 import requests
 import threading
 import importlib
+import asyncio
+import inspect
 from collections import defaultdict
 
 from watchdog.observers import Observer
@@ -28,7 +30,7 @@ RELOADED_CLASS_TYPES: dict = {}  # Stores types of classes that have been reload
 CUSTOM_NODE_ROOT: list[str] = folder_paths.folder_names_and_paths["custom_nodes"][0]  # Custom Node root directory list.
 
 # Set of modules to exclude from reloading.
-EXCLUDE_MODULES: set[str] = {'ComfyUI-Manager', 'ComfyUI-HotReloadHack'}
+EXCLUDE_MODULES: set[str] = {'ComfyUI-Manager', 'ComfyUI-HotReloadHack', 'rgthree-comfy'}
 if (HOTRELOAD_EXCLUDE := os.getenv("HOTRELOAD_EXCLUDE", None)) is not None:
     EXCLUDE_MODULES.update(x for x in HOTRELOAD_EXCLUDE.split(',') if x)
 
@@ -137,9 +139,10 @@ class DebouncedHotReloader(FileSystemEventHandler):
         self.__last_modified: defaultdict[str, float] = defaultdict(float)
         self.__reload_timers: dict[str, threading.Timer] = {}
         self.__hashes: dict[str, str] = {}
+        self.__mtimes: dict[str, float] = {}
         self.__lock: threading.Lock = threading.Lock()
 
-    def __reload(self, module_name: str) -> web.Response:
+    async def __reload(self, module_name: str) -> web.Response:
         """
         Reloads all relevant modules and clears caches.
 
@@ -160,21 +163,43 @@ class DebouncedHotReloader(FileSystemEventHandler):
             if module_name in sys.modules:
                 del sys.modules[module_name]
 
-            module_path_init: str = os.path.join(CUSTOM_NODE_ROOT[0], module_name, '__init__.py')
+            module_dir: str = os.path.join(CUSTOM_NODE_ROOT[0], module_name)
+            if os.path.isfile(module_dir):
+                # Single-file custom node (e.g. trainlatent2rgb.py)
+                module_path_init = module_dir
+            else:
+                # Package-style custom node with __init__.py
+                module_path_init = os.path.join(module_dir, '__init__.py')
             spec = importlib.util.spec_from_file_location(module_name, module_path_init)
             module = importlib.util.module_from_spec(spec)
 
             try:
                 sys.modules[module_name] = module
                 spec.loader.exec_module(module)
-                for key in module.NODE_CLASS_MAPPINGS.keys():
-                    RELOADED_CLASS_TYPES[key] = 3
+                # V1 node definition
+                if hasattr(module, 'NODE_CLASS_MAPPINGS') and module.NODE_CLASS_MAPPINGS is not None:
+                    for key in module.NODE_CLASS_MAPPINGS.keys():
+                        RELOADED_CLASS_TYPES[key] = 3
+                # V3 Extension Definition
+                elif hasattr(module, 'comfy_entrypoint'):
+                    entrypoint = getattr(module, 'comfy_entrypoint')
+                    if callable(entrypoint):
+                        if inspect.iscoroutinefunction(entrypoint):
+                            extension = await entrypoint()
+                        else:
+                            extension = entrypoint()
+                        node_list = await extension.get_node_list()
+                        for node_cls in node_list:
+                            schema = node_cls.GET_SCHEMA()
+                            RELOADED_CLASS_TYPES[schema.node_id] = 3
+                else:
+                    logging.warning(f"Module {module_name} has neither NODE_CLASS_MAPPINGS nor comfy_entrypoint; cache invalidation skipped.")
             except Exception as e:
                 logging.error(f"Failed to reload module {module_name}: {e}")
                 return web.Response(text='FAILED')
 
             module_path: str = os.path.join(CUSTOM_NODE_ROOT[0], module_name)
-            load_custom_node(module_path)
+            await load_custom_node(module_path)
             return web.Response(text='OK')
 
     def on_modified(self, event):
@@ -183,6 +208,11 @@ class DebouncedHotReloader(FileSystemEventHandler):
             return
 
         file_path: str = event.src_path
+
+        # Filter out temporary files created by editors (VS Code, etc.)
+        file_name: str = os.path.basename(file_path)
+        if file_name.startswith('.') or file_name.endswith(('.tmp', '.swp', '~')) or file_name.startswith('~'):
+            return
 
         if not any(ext == '*' for ext in HOTRELOAD_EXTENSIONS):
             if not any(file_path.endswith(ext) for ext in HOTRELOAD_EXTENSIONS):
@@ -199,11 +229,29 @@ class DebouncedHotReloader(FileSystemEventHandler):
         elif root_dir in EXCLUDE_MODULES:
             return
 
+        # Quick mtime check to filter out metadata-only changes (common on Windows)
+        try:
+            current_mtime: float = os.path.getmtime(file_path)
+        except OSError:
+            # File might not exist anymore
+            return
+
+        if current_mtime == self.__mtimes.get(file_path):
+            # mtime unchanged, skip hashing
+            return
+
         current_hash: str = hash_file(file_path)
+        if current_hash is None:
+            # File might not exist anymore (intermediate state during save)
+            return
+
         if current_hash == self.__hashes.get(file_path):
+            # Content hasn't changed, just update mtime cache
+            self.__mtimes[file_path] = current_mtime
             logging.debug(f"File {file_path} triggered event but content hasn't changed. Ignoring.")
             return
 
+        self.__mtimes[file_path] = current_mtime
         self.__hashes[file_path] = current_hash
         self.schedule_reload(root_dir)
 
@@ -236,8 +284,11 @@ class DebouncedHotReloader(FileSystemEventHandler):
                 return
 
         try:
-            self.__reload(module_name)
-            logging.info(f'[ComfyUI-HotReloadHack] Reloaded module {module_name}')
+            response = asyncio.run(self.__reload(module_name))
+            if response.text == 'OK':
+                logging.info(f'[ComfyUI-HotReloadHack] Reloaded module {module_name}')
+            else:
+                logging.warning(f'[ComfyUI-HotReloadHack] Failed to reload module {module_name}')
         except requests.RequestException as e:
             logging.error(f"Error calling reload for module {module_name}: {e}")
         except Exception as e:
